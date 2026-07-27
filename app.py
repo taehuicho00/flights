@@ -36,6 +36,19 @@ SCAN_MONTHS = 6
 _airport_cache = {}
 
 
+def _pick_airport(item):
+    """searchAirport 응답 1건에서 skyId/name 을 뽑는다.
+
+    이 API 는 skyId 를 응답 버전에 따라 최상위 또는
+    navigation.relevantFlightParams 안에 넣는다. 두 경우 모두 대응한다.
+    """
+    nav = item.get("navigation", {}) or {}
+    rfp = nav.get("relevantFlightParams", {}) or {}
+    sky_id = item.get("skyId") or rfp.get("skyId")
+    name = (item.get("presentation", {}) or {}).get("title") or nav.get("localizedName")
+    return sky_id, name
+
+
 def search_airport(query):
     """공항/도시 이름으로 skyId 를 찾는다 (IATA 코드가 아닌 스카이스캐너 자체 코드)."""
     key = query.strip().lower()
@@ -53,8 +66,11 @@ def search_airport(query):
     if not data:
         return None
 
-    top = data[0]
-    result = {"skyId": top["skyId"], "name": top.get("presentation", {}).get("title", query)}
+    sky_id, name = _pick_airport(data[0])
+    if not sky_id:
+        return None
+
+    result = {"skyId": sky_id, "name": name or query}
     _airport_cache[key] = result
     return result
 
@@ -208,6 +224,8 @@ def api_search():
         return jsonify({"error": f"API 오류: {e.response.status_code}"}), 502
     except requests.RequestException:
         return jsonify({"error": "네트워크 오류가 발생했습니다. 다시 시도하세요."}), 502
+    except Exception as e:  # 예상 못한 오류도 브라우저에 원인을 보여준다
+        return jsonify({"error": f"처리 중 오류: {type(e).__name__}: {e}"}), 500
 
 
 # ── 화면(HTML) ─ 원래 templates/index.html 내용을 여기에 합쳤다 ─────────
