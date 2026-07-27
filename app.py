@@ -10,7 +10,7 @@
 """
 
 import os
-import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
 import requests
@@ -155,20 +155,38 @@ def api_search():
             return jsonify({"error": "예산은 숫자로 입력하세요."}), 400
 
     try:
-        best_by_dest = {}  # {목적지명: 6개월 중 최저가 1건}
+        # 출발지 공항 코드(skyId)를 먼저 확보 (캐시됨)
+        origins = {}
+        for code in ORIGIN_AIRPORTS:
+            o = search_airport(code)
+            if o is not None:
+                origins[code] = o
 
+        # 조회할 (출발지, 날짜) 조합을 모두 만든다: 6개월 × 인천·김포
+        jobs = []
         for travel_date in sample_dates():
             return_date = travel_date + timedelta(days=nights) if nights > 0 else None
-            for code in ORIGIN_AIRPORTS:
-                origin = search_airport(code)
-                if origin is None:
-                    continue
+            for code, origin in origins.items():
+                jobs.append((code, origin, travel_date, return_date))
+
+        def fetch(job):
+            """한 조합을 조회. 하나 실패해도 전체가 멈추지 않도록 예외를 삼킨다."""
+            code, origin, travel_date, return_date = job
+            try:
                 raw = search_everywhere(origin["skyId"], travel_date, return_date)
-                for dest in extract_destinations(raw, code, travel_date):
+                return extract_destinations(raw, code, travel_date)
+            except requests.RequestException:
+                return []
+
+        # 순차로 12번(1~2분) 대신 동시에 처리 → 10~20초로 단축.
+        # (무료 API 속도 제한을 피하려 동시 개수는 4개로 제한)
+        best_by_dest = {}  # {목적지명: 6개월 중 최저가 1건}
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            for dests in pool.map(fetch, jobs):
+                for dest in dests:
                     name = dest["name"]
                     if name not in best_by_dest or dest["price_raw"] < best_by_dest[name]["price_raw"]:
                         best_by_dest[name] = dest
-                time.sleep(0.3)
 
         results = list(best_by_dest.values())
         if budget is not None:
