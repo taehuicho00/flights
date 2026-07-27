@@ -1,0 +1,12 @@
+# Render 배포 설정 파일 (Blueprint)
+# Render 가 이 파일을 읽어 자동으로 웹서비스를 만든다.
+services:
+  - type: web
+    name: narinsum-flights
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: RAPIDAPI_KEY
+        sync: false   # 값은 Render 대시보드에서 직접 입력 (코드에 노출 안 함)
